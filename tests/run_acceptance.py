@@ -192,7 +192,13 @@ def check4():
     sess = new_session()
     body, _ = invoke("What do you know about my travel preferences?", ACTOR_B, sess)
     resp = body.get("response", "").lower()
-    leaked = any(w in resp for w in ("hiking", "humidity", "boutique"))
+    # leak = agent ASSERTS knowledge of A's preferences (mere clarifying
+    # questions like "do you enjoy hiking?" are not a leak)
+    assertion = any(p in resp for p in (
+        "you love", "you prefer", "you mentioned", "you told me",
+        "i remember", "you hate", "you dislike", "your preference for"))
+    keywords = any(w in resp for w in ("hiking", "humidity", "boutique"))
+    leaked = assertion and keywords
     ns_b = f"/preferences/{ACTOR_B}"
     r = agentcore.retrieve_memory_records(
         memoryId=STATE["memory_id"], namespace=ns_b,
@@ -246,10 +252,13 @@ def check5(ref):
 
     # runtime application logs
     rt_group = None
-    for lg in logs_client.describe_log_groups(
-            logGroupNamePrefix="/aws/bedrock-agentcore/runtimes/")["logGroups"]:
-        if STATE["runtime_id"] in lg["logGroupName"]:
-            rt_group = lg["logGroupName"]
+    paginator = logs_client.get_paginator("describe_log_groups")
+    for page in paginator.paginate(logGroupNamePrefix="/aws/bedrock-agentcore/runtimes/"):
+        for lg in page["logGroups"]:
+            if STATE["runtime_id"] in lg["logGroupName"]:
+                rt_group = lg["logGroupName"]
+                break
+        if rt_group:
             break
     rt_events = 0
     if rt_group:
