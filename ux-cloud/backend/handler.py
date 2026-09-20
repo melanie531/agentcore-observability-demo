@@ -202,6 +202,11 @@ def handle_memory_logs(event: dict, params: dict) -> dict:
 
 
 def lambda_handler(event: dict, context) -> dict:
+    # Lambda (TracingConfig=PassThrough) sets _X_AMZN_TRACE_ID with Sampled=0;
+    # botocore's recursion-detection hook forwards it as X-Amzn-Trace-Id on
+    # invoke_agent_runtime, and the agent's parent-based sampler then drops
+    # ALL its spans. Remove it so the agent starts its own sampled root trace.
+    os.environ.pop("_X_AMZN_TRACE_ID", None)
     method = event["requestContext"]["http"]["method"]
     path = event.get("rawPath", "")
     params = event.get("queryStringParameters") or {}
