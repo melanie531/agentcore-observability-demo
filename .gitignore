@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+node_modules/
+*state*.json
+!config.example.json
+config.js
+.DS_Store
