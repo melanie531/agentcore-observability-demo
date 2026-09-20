@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Travel Preference Assistant — Hosted Observability Demo</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --border: #dde3ea; --text: #1c2733;
+    --muted: #5b6b7c; --accent: #0972d3; --accent-dark: #0757a5;
+    --user-bubble: #0972d3; --agent-bubble: #eef2f6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 12px 20px;
+           display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  .ctl { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  select, button, input { font-size: 13px; padding: 6px 10px; border: 1px solid var(--border);
+                   border-radius: 6px; background: #fff; color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: var(--accent-dark); }
+  #session-label, #user-label { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+  main { flex: 1; overflow-y: auto; padding: 20px; max-width: 900px; width: 100%; margin: 0 auto; }
+  .msg { margin: 10px 0; display: flex; flex-direction: column; }
+  .msg.user { align-items: flex-end; }
+  .msg.agent { align-items: flex-start; }
+  .bubble { max-width: 75%; padding: 10px 14px; border-radius: 12px; font-size: 14px;
+            line-height: 1.45; white-space: pre-wrap; }
+  .user .bubble { background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px; }
+  .agent .bubble { background: var(--agent-bubble); border-bottom-left-radius: 4px; }
+  .meta-toggle { font-size: 11px; color: var(--accent); cursor: pointer; margin-top: 4px;
+                 background: none; border: none; padding: 0; }
+  .telemetry { display: none; margin-top: 6px; max-width: 85%; background: #fbfcfd;
+               border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+               font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--muted);
+               overflow-x: auto; }
+  .telemetry.open { display: block; }
+  .telemetry dt { font-weight: 600; color: var(--text); margin-top: 6px; }
+  .telemetry dd { margin: 1px 0 0 0; word-break: break-all; }
+  .telemetry pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0; }
+  .status { font-size: 12px; color: var(--muted); font-style: italic; }
+  .error-text { color: #b3261e; }
+  footer { background: var(--panel); border-top: 1px solid var(--border); padding: 14px 20px; }
+  .input-row { max-width: 900px; margin: 0 auto; display: flex; gap: 10px; }
+  #prompt { flex: 1; padding: 10px 12px; font-size: 14px; border: 1px solid var(--border);
+            border-radius: 8px; resize: none; font-family: inherit; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px;
+           background: #e7f1fb; color: var(--accent-dark); margin-left: 6px; }
+  #login-overlay { position: fixed; inset: 0; background: var(--bg); display: flex;
+                   align-items: center; justify-content: center; z-index: 10; }
+  #login-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+                padding: 32px 40px; text-align: center; max-width: 420px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="login-overlay">
+  <div id="login-card">
+    <h2>Travel Preference Assistant</h2>
+    <p style="color:var(--muted);font-size:14px">Amazon Bedrock AgentCore observability demo.<br>
+       Sign in with your invited demo account.</p>
+    <button class="primary" id="login-btn" style="font-size:15px;padding:10px 26px">Sign in</button>
+    <p id="login-status" class="status"></p>
+  </div>
+</div>
+
+<header class="hidden" id="app-header">
+  <h1>Travel Preference Assistant <span class="badge">Hosted Demo</span></h1>
+  <div class="ctl">
+    <label for="traveler">Traveler</label>
+    <select id="traveler">
+      <option value="ava">Ava</option>
+      <option value="blake">Blake</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="scenario">Scenario</label>
+    <select id="scenario">
+      <option value="normal">Normal</option>
+      <option value="slow">Slow tool</option>
+      <option value="error">Tool error</option>
+    </select>
+  </div>
+  <button class="primary" id="new-session">New Session</button>
+  <span id="session-label"></span>
+  <span style="flex:1"></span>
+  <span id="user-label"></span>
+  <button id="logout">Logout</button>
+</header>
+<main id="chat" class="hidden"></main>
+<footer class="hidden" id="app-footer">
+  <div class="input-row">
+    <textarea id="prompt" rows="2" placeholder="Ask about a destination... (Enter to send, Shift+Enter for newline)"></textarea>
+    <button class="primary" id="send">Send</button>
+  </div>
+</footer>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,7 +1,13 @@
-"""Shared config for obsdemo infrastructure scripts."""
+"""Shared config for obsdemo infrastructure scripts.
 
-PROFILE = "platform-dev-takeover"
-REGION = "us-west-2"
+Env overrides: OBSDEMO_AWS_PROFILE, OBSDEMO_REGION, OBSDEMO_STATE_FILE,
+OBSDEMO_UX_STATE_FILE.
+"""
+
+import os
+
+PROFILE = os.environ.get("OBSDEMO_AWS_PROFILE", "platform-dev-takeover")
+REGION = os.environ.get("OBSDEMO_REGION", "us-west-2")
 
 RUNTIME_NAME = "obsdemo_travel_agent"
 MEMORY_NAME = "obsdemo_travel_memory"
@@ -16,7 +22,5 @@ LOG_RETENTION_DAYS = 7
 
 TAGS = {"project": "obsdemo", "owner": "melanie-demo", "env": "dev-demo"}
 
-STATE_FILE = (
-    "/Users/peiyaoli/.openclaw/workspace/work/agentcore-observability-demo/"
-    "build/local/deploy-state.json"
-)
+STATE_FILE = os.environ.get("OBSDEMO_STATE_FILE", "./build/deploy-state.json")
+UX_STATE_FILE = os.environ.get("OBSDEMO_UX_STATE_FILE", "./build/cloud-ux-state.json")
