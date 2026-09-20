@@ -14,11 +14,38 @@ from datetime import datetime, timezone
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from opentelemetry import trace
+from opentelemetry.sdk.trace import SpanProcessor
 from strands import Agent, tool
 from strands.models import BedrockModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("obsdemo.travel_agent")
+
+# ADOT's botocore patch stamps the caller's STS access-key ID onto every AWS API span
+# (aws-otel-python-instrumentation _botocore_patches.py) with no config switch to disable it.
+_REDACTED_SPAN_ATTRIBUTES = (
+    "aws.auth.account.access_key",
+    "aws.remote.resource.account.access_key",
+)
+
+
+class CredentialAttributeRedactor(SpanProcessor):
+    def on_start(self, span, parent_context=None) -> None:
+        for key in _REDACTED_SPAN_ATTRIBUTES:
+            if span.attributes is not None and key in span.attributes:
+                span.set_attribute(key, "REDACTED")
+
+
+def _install_redactor() -> None:
+    provider = trace.get_tracer_provider()
+    if hasattr(provider, "add_span_processor"):
+        provider.add_span_processor(CredentialAttributeRedactor())
+        logger.info("obsdemo: credential-attribute redactor installed")
+    else:
+        logger.warning("obsdemo: tracer provider has no add_span_processor; redactor NOT installed")
+
+
+_install_redactor()
 
 REGION = os.environ.get("AWS_REGION", "us-west-2")
 MEMORY_ID = os.environ["OBSDEMO_MEMORY_ID"]
