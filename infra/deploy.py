@@ -366,6 +366,9 @@ def main():
     state["runtime_arn"] = rt["agentRuntimeArn"]
     state["runtime_version"] = rt.get("agentRuntimeVersion")
     state["runtime_log_group_hint"] = f"/aws/bedrock-agentcore/runtimes/{rt['agentRuntimeId']}-DEFAULT"
+    # runtime creates its own log group on first invoke; enforce demo retention+tags
+    # (create it proactively so retention applies from the start)
+    ensure_log_group(state["runtime_log_group_hint"])
     save_state(state)
     log(f"DONE. state -> {STATE_FILE}")
 
