@@ -136,7 +136,7 @@ chat or files): AWS Console → Secrets Manager → your region →
 |---|---|
 | Runtime image fails to start | ECR image must be **linux/arm64** (`docker buildx build --platform linux/arm64`) |
 | Runtime stuck not-READY | Check the runtime log group for container crash loops; verify execution-role ECR pull + memory permissions |
-| Trace queries return nothing | `aws/spans` ingestion lags **several minutes** — retry with backoff before concluding |
+| Trace queries return nothing | `aws/spans` ingestion lags **several minutes** — retry with backoff. If attributed spans *never* arrive, check trace sampling: the X-Ray **Default rule samples only 5%** — this demo sets `OTEL_TRACES_SAMPLER=always_on` in the container (see Caveats) |
 | API returns 401 with a token | Common causes: token expired (1h default), wrong client id in audience, `Bearer ` prefix missing, using the access token where the authorizer audience only matches the id token's `aud` |
 | Browser CORS errors | The API allows exactly `https://<cloudfront-domain>`; opening the site via another origin (or http) will fail preflight |
 | CloudFront 403 right after deploy | Distribution deployment takes 5–15 min; also confirm the bucket policy's `AWS:SourceArn` matches the distribution ARN |
@@ -259,6 +259,18 @@ API additionally never projects any `aws.auth.*` attribute (defense in depth).
 
 ## Caveats
 
+- **Trace sampling is `always_on` (DEMO setting)**: the agent container sets
+  `OTEL_TRACES_SAMPLER=always_on` so every invocation's trace is inspectable
+  — without it, the account's X-Ray Default sampling rule (5% fixed rate,
+  reservoir 1/s) silently drops most demo traces (observed live: the trace
+  endpoint returned 0 attributed spans until this was set). The trade-off is
+  cost: 100% of spans are exported and ingested into CloudWatch
+  (`aws/spans`), so span ingestion/storage/query charges scale linearly with
+  traffic. In production, keep centralized X-Ray sampling rules or a
+  parent-based sampler and size the rate to your budget instead.
+- **Span export vs microVM suspend**: the entrypoint force-flushes the tracer
+  provider in a `finally` block — AgentCore suspends the microVM as soon as
+  the invocation returns, before `BatchSpanProcessor`'s background flush.
 - **Ingestion delay**: spans/logs land in `aws/spans` and log groups with a
   delay of up to several minutes. The UI/tests retry; the console needs patience.
 - **Retention**: runtime, memory-vended, and Lambda log groups are set to
