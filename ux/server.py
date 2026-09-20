@@ -14,11 +14,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 PROFILE = os.environ.get("OBSDEMO_PROFILE", "platform-dev-takeover")
-REGION = "us-west-2"
-STATE_FILE = os.environ.get(
-    "OBSDEMO_STATE_FILE",
-    "/Users/peiyaoli/.openclaw/workspace/work/agentcore-observability-demo/build/local/deploy-state.json",
-)
+REGION = os.environ.get("OBSDEMO_REGION", "us-west-2")
+STATE_FILE = os.environ.get("OBSDEMO_STATE_FILE", "./build/deploy-state.json")
 
 with open(STATE_FILE) as f:
     STATE = json.load(f)

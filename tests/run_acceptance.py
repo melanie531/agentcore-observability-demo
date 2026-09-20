@@ -18,11 +18,13 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 
-PROFILE = "platform-dev-takeover"
-REGION = "us-west-2"
-WORK = "/Users/peiyaoli/.openclaw/workspace/work/agentcore-observability-demo/build/local"
-STATE_FILE = f"{WORK}/deploy-state.json"
+PROFILE = os.environ.get("OBSDEMO_AWS_PROFILE", "platform-dev-takeover")
+REGION = os.environ.get("OBSDEMO_REGION", "us-west-2")
+WORK = os.environ.get("OBSDEMO_WORK_DIR", "./build/local")
+STATE_FILE = os.environ.get("OBSDEMO_STATE_FILE", f"{WORK}/deploy-state.json")
 OUT_DIR = f"{WORK}/acceptance"
+EXPECTED_MODEL_ID = os.environ.get(
+    "OBSDEMO_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -77,6 +79,7 @@ def invoke(prompt, actor_id, session_id, scenario="normal"):
         "prompt": prompt, "actor_id": actor_id,
         "session_id": session_id, "scenario": scenario,
     }).encode()
+    invoked_at_utc = datetime.now(timezone.utc).isoformat()
     t0 = time.time()
     resp = agentcore.invoke_agent_runtime(
         agentRuntimeArn=STATE["runtime_arn"],
@@ -91,7 +94,7 @@ def invoke(prompt, actor_id, session_id, scenario="normal"):
     EVIDENCE["scenarios"].append({
         "scenario": scenario, "actor_id": actor_id, "session_id": session_id,
         "runtime_session_id": runtime_session_id, "trace_id": body.get("trace_id"),
-        "invoked_at_utc": datetime.now(timezone.utc).isoformat(),
+        "invoked_at_utc": invoked_at_utc,
         "elapsed_s": round(elapsed, 2),
     })
     return body, elapsed
@@ -159,10 +162,11 @@ def check3(pref_session):
                      ACTOR_A, sess)
     prov = body.get("memory_provenance", {})
     cited = [r["record_id"] for r in prov.get("ltm_records_retrieved", [])]
-    real_cited = [c for c in cited if c in rec_ids or c]  # ids must be non-empty
+    # strict: citation list non-empty AND every cited ID is in the retrieved record-ID set
+    citations_valid = bool(cited) and all(c in rec_ids for c in cited)
     resp = body.get("response", "").lower()
     uses_prefs = any(w in resp for w in ("hik", "humid", "boutique"))
-    ok = bool(real_cited) and uses_prefs
+    ok = citations_valid and uses_prefs
     record("3-async-ltm", "PASS" if ok else "FAIL",
            f"extraction {elapsed:.0f}s/{polls} polls; {len(found)} records; "
            f"new session cited {len(cited)} record ids; prefs used in answer={uses_prefs}",
@@ -214,17 +218,32 @@ def check4():
 
 
 # ---------- Check 5: telemetry retrieval ----------
-def query_spans(trace_id, start, end):
-    q = (f'fields @timestamp, name, attributes.gen_ai.request.model, attributes.gen_ai.operation.name '
-         f'| filter traceId = "{trace_id}" | limit 50')
+QUERY_MANIFEST = []
+
+
+def run_insights_query(log_group, query, start, end, label):
+    """Run a Logs Insights query; record exact startTime/endTime/queryId in the manifest."""
+    start_i, end_i = int(start), int(end)
     qid = logs_client.start_query(
-        logGroupName="aws/spans", startTime=int(start), endTime=int(end), queryString=q)["queryId"]
+        logGroupName=log_group, startTime=start_i, endTime=end_i, queryString=query)["queryId"]
+    QUERY_MANIFEST.append({
+        "label": label, "log_group": log_group, "query": query,
+        "startTime": start_i, "endTime": end_i, "queryId": qid,
+        "started_at_utc": datetime.now(timezone.utc).isoformat(),
+    })
     for _ in range(30):
         r = logs_client.get_query_results(queryId=qid)
         if r["status"] in ("Complete", "Failed", "Cancelled"):
-            return q, r
+            return qid, r
         time.sleep(2)
-    return q, {"status": "Timeout", "results": []}
+    return qid, {"status": "Timeout", "results": []}
+
+
+def query_spans(trace_id, start, end):
+    q = (f'fields @timestamp, name, attributes.gen_ai.request.model, attributes.gen_ai.operation.name '
+         f'| filter traceId = "{trace_id}" | limit 50')
+    qid, r = run_insights_query("aws/spans", q, start, end, "check5-spans")
+    return q, r
 
 
 def check5(ref):
@@ -233,22 +252,30 @@ def check5(ref):
         record("5-telemetry", "FAIL", "no trace_id available from invocation")
         return
     start = time.time() - 1800
-    end = time.time() + 60
     log("waiting 90s for span/log ingestion...")
     time.sleep(90)
-    q, r = query_spans(trace_id, start, end)
-    rows = r.get("results", [])
-    names, has_model, has_tool = [], False, False
-    for row in rows:
-        d = {c["field"]: c["value"] for c in row}
-        n = d.get("name", "")
-        names.append(n)
-        if d.get("attributes.gen_ai.request.model") or d.get("attributes.gen_ai.operation.name"):
-            has_model = True
-        if "lookup_destination_info" in n:
-            has_tool = True
-    if not has_model:
-        has_model = any("chat" in n.lower() or "invoke" in n.lower() or "converse" in n.lower() for n in names)
+    # aws/spans ingestion can lag several minutes — retry with backoff
+    rows, names, has_model, has_tool, q = [], [], False, False, None
+    for attempt in range(5):
+        end = time.time() + 60
+        q, r = query_spans(trace_id, start, end)
+        rows = r.get("results", [])
+        names, has_model, has_tool = [], False, False
+        for row in rows:
+            d = {c["field"]: c["value"] for c in row}
+            n = d.get("name", "")
+            names.append(n)
+            # strict: a span must carry gen_ai.request.model equal to the
+            # configured model — no span-name fallback
+            if d.get("attributes.gen_ai.request.model") == EXPECTED_MODEL_ID:
+                has_model = True
+            if "lookup_destination_info" in n:
+                has_tool = True
+        if has_model and has_tool:
+            break
+        log(f"check5 attempt {attempt+1}: spans={len(rows)} model={has_model} "
+            f"tool={has_tool} — waiting 45s for ingestion")
+        time.sleep(45)
 
     # runtime application logs
     rt_group = None
@@ -278,7 +305,8 @@ def check5(ref):
     except logs_client.exceptions.ResourceNotFoundException:
         mem_events = -1
 
-    ok = len(rows) > 0 and has_model and has_tool and rt_events > 0
+    # strict: memory service-log events required too (mem_events > 0)
+    ok = len(rows) > 0 and has_model and has_tool and rt_events > 0 and mem_events > 0
     partial = len(rows) > 0 and (has_model or has_tool)
     status = "PASS" if ok else ("PARTIAL" if partial else "FAIL")
     record("5-telemetry", status,
@@ -321,27 +349,24 @@ def check6_telemetry(slow_trace, error_trace):
         if not tid:
             results[label] = "no trace_id"
             continue
-        q = (f'fields name, durationNano, status.code, @timestamp '
+        q = (f'fields name, durationNano, status.code, attributes.gen_ai.tool.status, @timestamp '
              f'| filter traceId = "{tid}" and name like /lookup_destination_info/ | limit 10')
-        qid = logs_client.start_query(logGroupName="aws/spans",
-                                      startTime=int(start), endTime=int(end), queryString=q)["queryId"]
-        rows = []
-        for _ in range(30):
-            r = logs_client.get_query_results(queryId=qid)
-            if r["status"] in ("Complete", "Failed", "Cancelled"):
-                rows = r.get("results", [])
-                break
-            time.sleep(2)
-        results[label] = [{c["field"]: c["value"] for c in row} for row in rows]
+        qid, r = run_insights_query("aws/spans", q, start, end, f"check6c-{label}-tool-spans")
+        results[label] = [{c["field"]: c["value"] for c in row} for row in r.get("results", [])]
     slow_spans = results.get("slow") or []
     slow_verified = any(float(s.get("durationNano", 0)) > 2.5e9 for s in slow_spans
                         if isinstance(s, dict))
     error_spans = results.get("error") or []
-    error_verified = len(error_spans) > 0  # error tool span present in trace
+    # strict: tool span with span status ERROR AND gen_ai.tool.status=error
+    error_verified = any(
+        s.get("status.code") == "ERROR"
+        and s.get("attributes.gen_ai.tool.status") == "error"
+        for s in error_spans if isinstance(s, dict))
     status = "PASS" if (slow_verified and error_verified) else "PARTIAL" if (slow_spans or error_spans) else "FAIL"
     record("6c-scenario-telemetry", status,
            f"slow tool span >2.5s in aws/spans={slow_verified}; "
-           f"error trace tool spans found={len(error_spans)}",
+           f"error tool span with status ERROR + gen_ai.tool.status=error={error_verified} "
+           f"({len(error_spans)} tool spans in error trace)",
            {"slow_spans": slow_spans, "error_spans": error_spans,
             "slow_trace": slow_trace, "error_trace": error_trace})
 
@@ -371,7 +396,8 @@ def check7():
 
 # ---------- Check 8: UX E2E ----------
 def check8():
-    env = dict(os.environ, AWS_PROFILE=PROFILE)
+    env = dict(os.environ, AWS_PROFILE=PROFILE,
+               OBSDEMO_STATE_FILE=os.path.abspath(STATE_FILE))
     proc = subprocess.Popen(
         [f"{REPO}/.venv/bin/python", "-m", "uvicorn", "server:app",
          "--host", "127.0.0.1", "--port", "8931"],
@@ -452,9 +478,20 @@ def main():
             "summary": summary,
             "results": RESULTS,
             "evidence": EVIDENCE,
+            "query_manifest": QUERY_MANIFEST,
         }
-        with open(f"{OUT_DIR}/results.json", "w") as f:
-            json.dump(out, f, indent=2, default=str)
+        # append to history — never erase prior runs
+        results_path = f"{OUT_DIR}/results.json"
+        history = {"runs": []}
+        if os.path.exists(results_path):
+            try:
+                prev = json.load(open(results_path))
+                history = prev if "runs" in prev else {"runs": [prev]}
+            except (json.JSONDecodeError, OSError):
+                os.rename(results_path, f"{results_path}.corrupt.{RUN_TAG}")
+        history["runs"].append(out)
+        with open(results_path, "w") as f:
+            json.dump(history, f, indent=2, default=str)
         with open(f"{OUT_DIR}/run.log", "a") as f:
             f.write("\n".join(LOG_LINES) + "\n")
         log(f"results -> {OUT_DIR}/results.json | summary: {summary}")
