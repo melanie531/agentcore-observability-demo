@@ -12,7 +12,8 @@ ENV AWS_REGION=us-west-2 \
     OTEL_PYTHON_DISTRO=aws_distro \
     OTEL_PYTHON_CONFIGURATOR=aws_configurator \
     OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
-    OTEL_TRACES_EXPORTER=otlp
+    OTEL_TRACES_EXPORTER=otlp \
+    OTEL_TRACES_SAMPLER=always_on
 
 EXPOSE 8080
 
