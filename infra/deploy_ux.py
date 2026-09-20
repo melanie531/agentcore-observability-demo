@@ -21,7 +21,8 @@ import time
 import boto3
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import PROFILE, REGION, TAGS, UX_STATE_FILE, STATE_FILE, LOG_RETENTION_DAYS
+from config import (ACCOUNT_SUFFIX, LOG_RETENTION_DAYS, PROFILE, REGION,
+                    STATE_FILE, TAGS, UX_STATE_FILE)
 
 SITE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "ux-cloud", "site")
@@ -47,8 +48,9 @@ def log(msg: str) -> None:
 
 def guard_account() -> str:
     acct = sts.get_caller_identity()["Account"]
-    if not acct.endswith("8809"):
-        raise SystemExit("ABORT: wrong AWS account (expected suffix 8809)")
+    if ACCOUNT_SUFFIX and not acct.endswith(ACCOUNT_SUFFIX):
+        raise SystemExit("ABORT: wrong AWS account (suffix mismatch with "
+                         "OBSDEMO_ACCOUNT_SUFFIX)")
     log(f"account verified: …{acct[-4:]}")
     return acct
 

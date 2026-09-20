@@ -7,3 +7,6 @@ node_modules/
 !config.example.json
 config.js
 .DS_Store
+
+# internal coordination briefs — not for publication
+*BRIEF.md

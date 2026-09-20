@@ -8,6 +8,9 @@ import os
 
 PROFILE = os.environ.get("OBSDEMO_AWS_PROFILE", "platform-dev-takeover")
 REGION = os.environ.get("OBSDEMO_REGION", "us-west-2")
+# optional safety guard: if set, scripts abort unless the caller-identity
+# account ends with this suffix (e.g. export OBSDEMO_ACCOUNT_SUFFIX=1234)
+ACCOUNT_SUFFIX = os.environ.get("OBSDEMO_ACCOUNT_SUFFIX", "")
 
 RUNTIME_NAME = "obsdemo_travel_agent"
 MEMORY_NAME = "obsdemo_travel_memory"

@@ -14,7 +14,7 @@ import time
 import boto3
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import PROFILE, REGION
+from config import ACCOUNT_SUFFIX, PROFILE, REGION
 
 session = boto3.Session(profile_name=PROFILE, region_name=REGION)
 sts = session.client("sts")
@@ -45,8 +45,9 @@ def log(msg: str) -> None:
 
 def guard_account() -> None:
     acct = sts.get_caller_identity()["Account"]
-    if not acct.endswith("8809"):
-        raise SystemExit("ABORT: wrong AWS account (expected suffix 8809)")
+    if ACCOUNT_SUFFIX and not acct.endswith(ACCOUNT_SUFFIX):
+        raise SystemExit("ABORT: wrong AWS account (suffix mismatch with "
+                         "OBSDEMO_ACCOUNT_SUFFIX)")
     log(f"account verified: …{acct[-4:]} | mode: {'DELETE' if CONFIRM else 'PREVIEW'}")
 
 
