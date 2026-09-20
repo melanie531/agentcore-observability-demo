@@ -111,17 +111,24 @@ python infra/deploy_ux.py                 # S3+CloudFront+Cognito+API+Lambda
 
 See `ux-cloud/README.md` for the security model and `config.js` generation.
 
-### 3. Auth setup (admin invite — no passwords in shells or files)
+### 3. Auth setup (dedicated username login — no email anywhere)
 
-Self-signup is off. Invite a user; Cognito emails a temporary password and
-forces a change at first login:
+Self-signup is off. Provision a dedicated demo login with `infra/provision_demo_user.py`:
+no email attribute, no invitation or verification email, no personal-account
+dependence. The script generates a strong random password **in process memory
+only**, applies it as permanent, persists it solely to an AWS Secrets Manager
+secret via the SDK, and live-verifies `USER_PASSWORD_AUTH` — printing statuses
+only, never values. Re-running is idempotent: an existing user/secret pair is
+verified, never rotated.
 
 ```bash
-aws cognito-idp admin-create-user \
-  --user-pool-id <pool-id> --username <email> \
-  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true \
-  --desired-delivery-mediums EMAIL
+python infra/provision_demo_user.py            # creates/verifies demo-presenter
+python infra/provision_demo_user.py <username> # or a custom username
 ```
+
+Retrieve the password yourself when you need to sign in (never paste it into
+chat or files): AWS Console → Secrets Manager → your region →
+`obsdemo/<username>-login` → **Retrieve secret value**.
 
 ### Troubleshooting
 
