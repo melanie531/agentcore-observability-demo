@@ -198,6 +198,22 @@ If you know the traveler's remembered preferences, weave them in naturally
 app = BedrockAgentCoreApp()
 
 
+def _flush_spans() -> None:
+    # AgentCore suspends the runtime microVM as soon as the invocation returns,
+    # before the OTel BatchSpanProcessor's background flush runs — force-flush
+    # now so agent/gen_ai spans actually export within the invocation window.
+    try:
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            t0 = time.monotonic()
+            ok = provider.force_flush(timeout_millis=5000)
+            elapsed = int((time.monotonic() - t0) * 1000)
+            log = logger.info if ok else logger.warning
+            log("obsdemo: tracer force_flush ok=%s elapsed_ms=%d", ok, elapsed)
+    except Exception:
+        logger.exception("obsdemo: tracer provider force_flush failed")
+
+
 @app.entrypoint
 def invoke(payload: dict, context=None) -> dict:
     prompt = str(payload.get("prompt", "")).strip()
@@ -223,40 +239,43 @@ def invoke(payload: dict, context=None) -> dict:
         prefs = "\n".join(f"- {r['snippet']}" for r in ltm_records)
         system_prompt += f"\n\nRemembered preferences for this traveler (from long-term memory):\n{prefs}"
 
-    model = BedrockModel(model_id=MODEL_ID, region_name=REGION)
-    agent = Agent(
-        model=model,
-        tools=[lookup_destination_info],
-        system_prompt=system_prompt,
-        messages=prior_messages,
-        trace_attributes={
-            "obsdemo.actor_id": actor_id,
-            "obsdemo.session_id": session_id,
-            "obsdemo.scenario": scenario,
-        },
-    )
-    result = agent(prompt)
-    answer = str(result)
+    try:
+        model = BedrockModel(model_id=MODEL_ID, region_name=REGION)
+        agent = Agent(
+            model=model,
+            tools=[lookup_destination_info],
+            system_prompt=system_prompt,
+            messages=prior_messages,
+            trace_attributes={
+                "obsdemo.actor_id": actor_id,
+                "obsdemo.session_id": session_id,
+                "obsdemo.scenario": scenario,
+            },
+        )
+        result = agent(prompt)
+        answer = str(result)
 
-    _store_turn(actor_id, session_id, prompt, answer)
+        _store_turn(actor_id, session_id, prompt, answer)
 
-    trace_id = None
-    span_ctx = trace.get_current_span().get_span_context()
-    if span_ctx.is_valid and span_ctx.trace_id:
-        trace_id = format(span_ctx.trace_id, "032x")
+        trace_id = None
+        span_ctx = trace.get_current_span().get_span_context()
+        if span_ctx.is_valid and span_ctx.trace_id:
+            trace_id = format(span_ctx.trace_id, "032x")
 
-    return {
-        "response": answer,
-        "session_id": session_id,
-        "actor_id": actor_id,
-        "scenario": scenario,
-        "trace_id": trace_id,
-        "memory_provenance": {
-            "ltm_records_retrieved": ltm_records,
-            "ltm_record_count": len(ltm_records),
-            "stm_events_used": len(stm_events),
-        },
-    }
+        return {
+            "response": answer,
+            "session_id": session_id,
+            "actor_id": actor_id,
+            "scenario": scenario,
+            "trace_id": trace_id,
+            "memory_provenance": {
+                "ltm_records_retrieved": ltm_records,
+                "ltm_record_count": len(ltm_records),
+                "stm_events_used": len(stm_events),
+            },
+        }
+    finally:
+        _flush_spans()
 
 
 if __name__ == "__main__":

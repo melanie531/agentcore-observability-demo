@@ -147,16 +147,25 @@ def handle_trace(event: dict, params: dict) -> dict:
             break
         time.sleep(1.5)
 
-    spans, owner_prefix, owned = [], f"u-{sub}-", False
+    spans, owner_prefix = [], f"u-{sub}-"
+    owned = foreign = False
     for row in rows:
         d = {c["field"]: c["value"] for c in row if c["field"] in SPAN_FIELDS}
         a = d.get("attributes.obsdemo.actor_id")
-        if a and a.startswith(owner_prefix):
-            owned = True
+        if a:
+            if a.startswith(owner_prefix):
+                owned = True
+            else:
+                foreign = True
         spans.append(d)
-    # trace ownership: at least one span must carry this sub's derived actor id
-    if spans and not owned:
+    if foreign:
         return _resp(403, {"error": "trace does not belong to the authenticated user"})
+    if spans and not owned:
+        # spans ingest piecemeal: AWS-SDK spans (no actor attribute) can land
+        # minutes before the attributed Strands spans — not yet attributable
+        return _resp(200, {"trace_id": trace_id, "span_count": 0, "spans": [],
+                           "note": "trace not yet attributable — spans still "
+                                   "ingesting; retry in a minute"})
     return _resp(200, {"trace_id": trace_id, "span_count": len(spans),
                        "spans": spans, "query_status": r["status"] if rows or r else "Timeout",
                        "note": "spans ingest into aws/spans with delay; retry if empty"})

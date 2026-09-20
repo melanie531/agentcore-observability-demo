@@ -9,6 +9,7 @@ Run: AWS_PROFILE=<profile> python tests/run_cloud_ux_acceptance.py
 
 import json
 import os
+import re
 import secrets
 import string
 import sys
@@ -187,6 +188,8 @@ def contains_aws_auth(obj) -> bool:
         return any("aws.auth" in k or contains_aws_auth(v) for k, v in obj.items())
     if isinstance(obj, list):
         return any(contains_aws_auth(x) for x in obj)
+    if isinstance(obj, str):
+        return "aws.auth" in obj or bool(re.search(r"(AKIA|ASIA)[0-9A-Z]{16}", obj))
     return False
 
 
@@ -196,7 +199,9 @@ def check_telemetry(token, label, trace_id):
         code, data = api_call("GET",
                               f"/api/telemetry/trace?trace_id={trace_id}&traveler=ava", token)
         spans = data.get("spans", [])
-        if spans:
+        if contains_aws_auth(data):
+            break  # credential leak — fail fast
+        if spans and any(s.get("attributes.gen_ai.request.model") for s in spans):
             break
         time.sleep(45)
     no_auth_leak = not contains_aws_auth(data)
